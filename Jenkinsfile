@@ -2,17 +2,17 @@ pipeline {
     agent any
 
     environment {
-        REGISTRY = 'jeeva1306'   // change to your DockerHub username
+        REGISTRY = 'jeeva1306'             // your DockerHub username
         IMAGE_NAME = 'myapp'
-        IMAGE_TAG = "${env.BUILD_NUMBER}"
-        DOCKER_CRED_ID = 'dockerhub-creds'
+        IMAGE_TAG = "${env.BUILD_NUMBER}"  // auto tag with build number
+        DOCKER_CRED_ID = 'dockerhub-creds' // Jenkins Docker Hub credentials ID
     }
 
     stages {
 
         stage('Checkout Code') {
             steps {
-                git branch: 'main', url: 'https://github.com/jeeva113/gittest.git'
+                git branch: 'master', url: 'https://github.com/jeeva113/gittest.git'
             }
         }
 
@@ -28,7 +28,7 @@ pipeline {
             steps {
                 sh '''
                     echo "✅ Running tests..."
-                    node -v    # check Node installed in image
+                    node -v    # verify Node.js installed inside Jenkins node
                 '''
             }
         }
@@ -49,6 +49,16 @@ pipeline {
                     echo "🚀 Running container..."
                     docker rm -f calculator-app || true
                     docker run -d --name calculator-app -p 5000:5000 ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+                '''
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                sh '''
+                    echo "🔍 Checking if app is responding..."
+                    sleep 5
+                    curl -f http://localhost:5000 || (echo "❌ App did not start correctly!" && exit 1)
                 '''
             }
         }
