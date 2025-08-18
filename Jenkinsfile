@@ -5,24 +5,24 @@ pipeline {
         REGISTRY = 'jeeva1306'
         IMAGE_NAME = 'myapp'
         IMAGE_TAG = "${env.BUILD_NUMBER}"
-        DOCKER_CRED_ID = 'dockerhub-creds'
-        K8S_MANIFEST_PATH = "${WORKSPACE}/k8s"  // full path to k8s folder
+        DOCKER_CRED_ID = 'dockerhub-creds'       // Jenkins DockerHub credentials ID
         AWS_REGION = 'us-east-1'
-        EKS_CLUSTER = 'myeks'
-        KUBECTL_PATH = '/root/bin/kubectl'      // full path to kubectl
+        AWS_CRED_ID = 'aws-creds-id'            // Jenkins AWS credentials ID
+        K8S_MANIFEST_PATH = "${WORKSPACE}/k8s"  // Path to your k8s manifests
+        KUBECTL_PATH = '/root/bin/kubectl'      // Absolute path to kubectl
     }
 
     stages {
-        stage('Checkout Code') {
+        stage('Checkout SCM') {
             steps {
-                git branch: 'master', url: 'https://github.com/jeeva113/gittest.git', credentialsId: 'github-creds'
+                git branch: 'master', url: 'https://github.com/jeeva113/gittest', credentialsId: 'github-creds'
             }
         }
 
         stage('Build Docker Image') {
             steps {
                 script {
-                    docker.build("${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}")
+                    sh "docker build -t ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ."
                 }
             }
         }
@@ -30,8 +30,9 @@ pipeline {
         stage('Push Image to Docker Hub') {
             steps {
                 script {
-                    docker.withRegistry("https://index.docker.io/v1/", "${DOCKER_CRED_ID}") {
-                        docker.image("${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}").push()
+                    withDockerRegistry([credentialsId: "${DOCKER_CRED_ID}", url: 'https://index.docker.io/v1/']) {
+                        sh "docker tag ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                        sh "docker push ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
                     }
                 }
             }
@@ -39,22 +40,22 @@ pipeline {
 
         stage('Update K8s Manifests') {
             steps {
-                sh """
-                    sed -i "s#${REGISTRY}/${IMAGE_NAME}:.*#${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}#g" ${K8S_MANIFEST_PATH}/deployment.yaml
-                """
+                sh "sed -i 's#${REGISTRY}/${IMAGE_NAME}:.*#${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}#g' ${K8S_MANIFEST_PATH}/deployment.yaml"
             }
         }
 
         stage('Deploy to EKS') {
             steps {
-                script {
-                    echo '🚀 Updating kubeconfig...'
-                    sh "aws eks update-kubeconfig --name ${EKS_CLUSTER} --region ${AWS_REGION} --kubeconfig ${WORKSPACE}/kubeconfig"
+                withAWS(region: "${AWS_REGION}", credentials: "${AWS_CRED_ID}") {
+                    script {
+                        echo '🚀 Updating kubeconfig...'
+                        sh "aws eks update-kubeconfig --name myeks --region ${AWS_REGION} --kubeconfig ${WORKSPACE}/kubeconfig"
 
-                    echo '🚀 Deploying to EKS...'
-                    sh "${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig apply -f ${K8S_MANIFEST_PATH}/deployment.yaml"
-                    sh "${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig apply -f ${K8S_MANIFEST_PATH}/service.yaml"
-                    sh "${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig rollout status deployment/calculator-deployment"
+                        echo '🚀 Deploying to EKS...'
+                        sh "${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig apply -f ${K8S_MANIFEST_PATH}/deployment.yaml"
+                        sh "${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig apply -f ${K8S_MANIFEST_PATH}/service.yaml"
+                        sh "${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig rollout status deployment/calculator-deployment"
+                    }
                 }
             }
         }
@@ -62,10 +63,10 @@ pipeline {
 
     post {
         success {
-            echo "✅ App deployed successfully! Check ELB via '${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig get svc calculator-service'"
+            echo '✅ Deployment succeeded!'
         }
         failure {
-            echo "❌ Deployment failed!"
+            echo '❌ Deployment failed!'
         }
     }
 }
