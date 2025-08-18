@@ -48,7 +48,7 @@ pipeline {
                 sh '''
                     echo "🚀 Running container..."
                     docker rm -f calculator-app || true
-                    docker run -d --name calculator-app -p 5000:5000 ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+                    docker run -d --name calculator-app -p 5100:5000 ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
                 '''
             }
         }
