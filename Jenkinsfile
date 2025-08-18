@@ -2,14 +2,14 @@ pipeline {
     agent any
 
     environment {
-        REGISTRY = 'jeeva1306'             // your DockerHub username
+        REGISTRY = 'jeeva1306'
         IMAGE_NAME = 'myapp'
-        IMAGE_TAG = "${env.BUILD_NUMBER}"  // auto tag with build number
-        DOCKER_CRED_ID = 'dockerhub-creds' // Jenkins Docker Hub credentials ID
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+        DOCKER_CRED_ID = 'dockerhub-creds'
+        K8S_MANIFEST_PATH = 'k8s'  // folder where deployment.yaml & service.yaml are kept
     }
 
     stages {
-
         stage('Checkout Code') {
             steps {
                 git branch: 'master', url: 'https://github.com/jeeva113/gittest.git'
@@ -24,15 +24,6 @@ pipeline {
             }
         }
 
-        stage('Run Tests') {
-            steps {
-                sh '''
-                    echo "✅ Running tests..."
-                    node -v    # verify Node.js installed inside Jenkins node
-                '''
-            }
-        }
-
         stage('Push Image to Docker Hub') {
             steps {
                 script {
@@ -43,22 +34,21 @@ pipeline {
             }
         }
 
-        stage('Run Container') {
+        stage('Update K8s Manifests') {
             steps {
                 sh '''
-                    echo "🚀 Running container..."
-                    docker rm -f calculator-app || true
-                    docker run -d --name calculator-app -p 5100:5000 ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+                  sed -i "s#jeeva1306/myapp:.*#jeeva1306/myapp:${IMAGE_TAG}#g" ${K8S_MANIFEST_PATH}/deployment.yaml
                 '''
             }
         }
 
-        stage('Health Check') {
+        stage('Deploy to EKS') {
             steps {
                 sh '''
-                    echo "🔍 Checking if app is responding..."
-                    sleep 5
-                    curl -f http://localhost:5000 || (echo "❌ App did not start correctly!" && exit 1)
+                  echo "🚀 Deploying to EKS..."
+                  kubectl apply -f ${K8S_MANIFEST_PATH}/deployment.yaml
+                  kubectl apply -f ${K8S_MANIFEST_PATH}/service.yaml
+                  kubectl rollout status deployment/calculator-deployment
                 '''
             }
         }
@@ -66,10 +56,10 @@ pipeline {
 
     post {
         success {
-            echo "✅ Build & Deployment Successful! Access app at http://<EC2-PUBLIC-IP>:5000"
+            echo "✅ App deployed successfully! Check ELB via 'kubectl get svc calculator-service'"
         }
         failure {
-            echo "❌ Build or Deployment Failed!"
+            echo "❌ Deployment failed!"
         }
     }
 }
