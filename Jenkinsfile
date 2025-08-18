@@ -6,14 +6,14 @@ pipeline {
         IMAGE_NAME = 'myapp'
         IMAGE_TAG = "${env.BUILD_NUMBER}"
         DOCKER_CRED_ID = 'dockerhub-creds'
-        K8S_MANIFEST_PATH = 'k8s'          // folder where deployment.yaml & service.yaml are kept
-        AWS_CRED_ID = 'aws-eks-creds'      // AWS credentials stored in Jenkins
-        AWS_REGION = 'us-east-1'           // EKS region
-        EKS_CLUSTER = 'myeks'              // EKS cluster name
+        K8S_MANIFEST_PATH = 'k8s'       // relative to repo root
+        AWS_CRED_ID = 'aws-eks-creds'
+        AWS_REGION = 'us-east-1'
+        EKS_CLUSTER = 'myeks'
+        KUBECONFIG_PATH = "${WORKSPACE}/kubeconfig"
     }
 
     stages {
-
         stage('Checkout Code') {
             steps {
                 git branch: 'master', url: 'https://github.com/jeeva113/gittest.git'
@@ -31,7 +31,7 @@ pipeline {
         stage('Push Image to Docker Hub') {
             steps {
                 script {
-                    docker.withRegistry("https://index.docker.io/v1/", "${DOCKER_CRED_ID}") {
+                    docker.withRegistry('https://index.docker.io/v1/', "${DOCKER_CRED_ID}") {
                         docker.image("${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}").push()
                     }
                 }
@@ -40,35 +40,34 @@ pipeline {
 
         stage('Update K8s Manifests') {
             steps {
-                sh '''
-                  sed -i "s#jeeva1306/myapp:.*#jeeva1306/myapp:${IMAGE_TAG}#g" ${K8S_MANIFEST_PATH}/deployment.yaml
-                '''
+                sh """
+                    sed -i 's#${REGISTRY}/${IMAGE_NAME}:.*#${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}#g' ${K8S_MANIFEST_PATH}/deployment.yaml
+                """
             }
         }
 
         stage('Deploy to EKS') {
             steps {
-                withAWS(credentials: "${AWS_CRED_ID}", region: "${AWS_REGION}") {
-                    sh '''
-                      echo "🚀 Updating kubeconfig..."
-                      aws eks update-kubeconfig --name ${EKS_CLUSTER}
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CRED_ID}"]]) {
+                    sh """
+                        echo '🚀 Updating kubeconfig...'
+                        aws eks update-kubeconfig --name ${EKS_CLUSTER} --region ${AWS_REGION} --kubeconfig ${KUBECONFIG_PATH}
 
-                      echo "🚀 Applying Kubernetes manifests..."
-                      kubectl apply -f ${K8S_MANIFEST_PATH}/deployment.yaml
-                      kubectl apply -f ${K8S_MANIFEST_PATH}/service.yaml
+                        echo '🚀 Deploying to EKS...'
+                        kubectl --kubeconfig ${KUBECONFIG_PATH} apply -f ${WORKSPACE}/${K8S_MANIFEST_PATH}/deployment.yaml
+                        kubectl --kubeconfig ${KUBECONFIG_PATH} apply -f ${WORKSPACE}/${K8S_MANIFEST_PATH}/service.yaml
 
-                      echo "🚀 Waiting for deployment rollout..."
-                      kubectl rollout status deployment/calculator-deployment
-                    '''
+                        echo '🚀 Waiting for rollout to complete...'
+                        kubectl --kubeconfig ${KUBECONFIG_PATH} rollout status deployment/calculator-deployment
+                    """
                 }
             }
         }
-
     }
 
     post {
         success {
-            echo "✅ App deployed successfully! Check ELB via 'kubectl get svc calculator-service'"
+            echo "✅ Deployment successful! Check ELB via: kubectl --kubeconfig ${KUBECONFIG_PATH} get svc calculator-service"
         }
         failure {
             echo "❌ Deployment failed!"
