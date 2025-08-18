@@ -7,6 +7,9 @@ pipeline {
         IMAGE_TAG = "${env.BUILD_NUMBER}"
         DOCKER_CRED_ID = 'dockerhub-creds'
         K8S_MANIFEST_PATH = 'k8s'  // folder where deployment.yaml & service.yaml are kept
+        AWS_CRED_ID = 'aws-eks-creds' // Added for AWS access
+        AWS_REGION = 'us-east-1'    // EKS region
+        EKS_CLUSTER = 'myeks'         // EKS cluster name
     }
 
     stages {
@@ -44,12 +47,20 @@ pipeline {
 
         stage('Deploy to EKS') {
             steps {
-                sh '''
-                  echo "🚀 Deploying to EKS..."
-                  kubectl apply -f ${K8S_MANIFEST_PATH}/deployment.yaml
-                  kubectl apply -f ${K8S_MANIFEST_PATH}/service.yaml
-                  kubectl rollout status deployment/calculator-deployment
-                '''
+                // Use AWS credentials safely
+                withAWS(credentials: "${AWS_CRED_ID}", region: "${AWS_REGION}") {
+                    sh '''
+                      echo "🚀 Updating kubeconfig..."
+                      aws eks update-kubeconfig --name ${EKS_CLUSTER}
+
+                      echo "🚀 Deploying to EKS..."
+                      kubectl apply -f ${K8S_MANIFEST_PATH}/deployment.yaml
+                      kubectl apply -f ${K8S_MANIFEST_PATH}/service.yaml
+
+                      echo "🚀 Waiting for rollout to complete..."
+                      kubectl rollout status deployment/calculator-deployment
+                    '''
+                }
             }
         }
     }
@@ -62,4 +73,3 @@ pipeline {
             echo "❌ Deployment failed!"
         }
     }
-}
