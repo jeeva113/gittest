@@ -6,11 +6,8 @@ pipeline {
         IMAGE_NAME = 'myapp'
         IMAGE_TAG = "${env.BUILD_NUMBER}"
         DOCKER_CRED_ID = 'dockerhub-creds'
-        K8S_MANIFEST_PATH = "${WORKSPACE}/k8s"
-        KUBECTL_PATH = '/root/bin/kubectl'
-        AWS_REGION = 'us-east-1'
-        EKS_CLUSTER_NAME = 'myeks'
-        AWS_CRED_ID = 'aws-eks-creds'
+        K8S_MANIFEST_PATH = 'k8s'
+        KUBECTL_PATH = '/usr/local/bin/kubectl' // updated path
     }
 
     stages {
@@ -30,9 +27,11 @@ pipeline {
 
         stage('Push Image to Docker Hub') {
             steps {
-                withDockerRegistry([credentialsId: "${DOCKER_CRED_ID}", url: "https://index.docker.io/v1/"]) {
-                    sh "docker tag ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
-                    sh "docker push ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                script {
+                    withDockerRegistry([credentialsId: "${DOCKER_CRED_ID}", url: "https://index.docker.io/v1/"]) {
+                        sh "docker tag ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                        sh "docker push ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                    }
                 }
             }
         }
@@ -45,14 +44,12 @@ pipeline {
 
         stage('Deploy to EKS') {
             steps {
-                withAWS(credentials: "${AWS_CRED_ID}", region: "${AWS_REGION}") {
-                    echo "🚀 Updating kubeconfig..."
-                    sh "aws eks update-kubeconfig --name ${EKS_CLUSTER_NAME} --region ${AWS_REGION} --kubeconfig ${WORKSPACE}/kubeconfig"
+                withAWS(credentials: 'aws-eks-creds', region: 'us-east-1') {
+                    echo '🚀 Updating kubeconfig...'
+                    sh "aws eks update-kubeconfig --name myeks --region us-east-1 --kubeconfig \$WORKSPACE/kubeconfig"
 
-                    echo "🚀 Deploying to EKS..."
-                    sh "${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig apply -f ${K8S_MANIFEST_PATH}/deployment.yaml"
-                    sh "${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig apply -f ${K8S_MANIFEST_PATH}/service.yaml"
-                    sh "${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig rollout status deployment/calculator-deployment"
+                    echo '🚀 Deploying to EKS...'
+                    sh "${KUBECTL_PATH} --kubeconfig \$WORKSPACE/kubeconfig apply -f \$WORKSPACE/${K8S_MANIFEST_PATH}/deployment.yaml"
                 }
             }
         }
@@ -60,10 +57,10 @@ pipeline {
 
     post {
         success {
-            echo "✅ Deployment succeeded!"
+            echo '✅ Deployment succeeded!'
         }
         failure {
-            echo "❌ Deployment failed!"
+            echo '❌ Deployment failed!'
         }
     }
 }
