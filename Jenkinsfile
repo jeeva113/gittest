@@ -5,15 +5,16 @@ pipeline {
         REGISTRY = 'jeeva1306'
         IMAGE_NAME = 'myapp'
         IMAGE_TAG = "${env.BUILD_NUMBER}"
-        DOCKER_CRED_ID = 'dockerhub-creds'       // Jenkins DockerHub credentials ID
+        DOCKER_CRED_ID = 'dockerhub-creds'
+        K8S_MANIFEST_PATH = "${WORKSPACE}/k8s"
+        KUBECTL_PATH = '/root/bin/kubectl'
         AWS_REGION = 'us-east-1'
-        AWS_CRED_ID = 'aws-creds-id'            // Jenkins AWS credentials ID
-        K8S_MANIFEST_PATH = "${WORKSPACE}/k8s"  // Path to your k8s manifests
-        KUBECTL_PATH = '/root/bin/kubectl'      // Absolute path to kubectl
+        EKS_CLUSTER_NAME = 'myeks'
+        AWS_CRED_ID = 'aws-eks-creds'
     }
 
     stages {
-        stage('Checkout SCM') {
+        stage('Checkout Code') {
             steps {
                 git branch: 'master', url: 'https://github.com/jeeva113/gittest', credentialsId: 'github-creds'
             }
@@ -29,11 +30,9 @@ pipeline {
 
         stage('Push Image to Docker Hub') {
             steps {
-                script {
-                    withDockerRegistry([credentialsId: "${DOCKER_CRED_ID}", url: 'https://index.docker.io/v1/']) {
-                        sh "docker tag ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
-                        sh "docker push ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
-                    }
+                withDockerRegistry([credentialsId: "${DOCKER_CRED_ID}", url: "https://index.docker.io/v1/"]) {
+                    sh "docker tag ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                    sh "docker push ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
                 }
             }
         }
@@ -46,16 +45,14 @@ pipeline {
 
         stage('Deploy to EKS') {
             steps {
-                withAWS(region: "${AWS_REGION}", credentials: "${AWS_CRED_ID}") {
-                    script {
-                        echo '🚀 Updating kubeconfig...'
-                        sh "aws eks update-kubeconfig --name myeks --region ${AWS_REGION} --kubeconfig ${WORKSPACE}/kubeconfig"
+                withAWS(credentials: "${AWS_CRED_ID}", region: "${AWS_REGION}") {
+                    echo "🚀 Updating kubeconfig..."
+                    sh "aws eks update-kubeconfig --name ${EKS_CLUSTER_NAME} --region ${AWS_REGION} --kubeconfig ${WORKSPACE}/kubeconfig"
 
-                        echo '🚀 Deploying to EKS...'
-                        sh "${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig apply -f ${K8S_MANIFEST_PATH}/deployment.yaml"
-                        sh "${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig apply -f ${K8S_MANIFEST_PATH}/service.yaml"
-                        sh "${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig rollout status deployment/calculator-deployment"
-                    }
+                    echo "🚀 Deploying to EKS..."
+                    sh "${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig apply -f ${K8S_MANIFEST_PATH}/deployment.yaml"
+                    sh "${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig apply -f ${K8S_MANIFEST_PATH}/service.yaml"
+                    sh "${KUBECTL_PATH} --kubeconfig ${WORKSPACE}/kubeconfig rollout status deployment/calculator-deployment"
                 }
             }
         }
@@ -63,10 +60,10 @@ pipeline {
 
     post {
         success {
-            echo '✅ Deployment succeeded!'
+            echo "✅ Deployment succeeded!"
         }
         failure {
-            echo '❌ Deployment failed!'
+            echo "❌ Deployment failed!"
         }
     }
 }
