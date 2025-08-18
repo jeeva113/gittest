@@ -18,4 +18,4 @@ spec:
       - name: calculator
         image: jeeva1306/myapp:latest   # Jenkins will update tag
         ports:
-        - containerPort: 5000
+        - containerPort: 5200
